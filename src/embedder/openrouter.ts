@@ -83,7 +83,20 @@ export class OpenRouterEmbedder implements Embedder {
 
     try {
       const raw = data.choices[0]?.message.content ?? "{}";
-      const parsed = JSON.parse(raw) as ThoughtMetadataExtracted;
+      // Some LLMs (notably Claude via openai-compatible proxies) wrap JSON in
+      // markdown fences even when response_format: json_object is requested.
+      // Strip optional ```json/``` fences and any leading prose before the first '{'.
+      const stripped = raw
+        .trim()
+        .replace(/^```(?:json)?\s*/i, "")
+        .replace(/```\s*$/i, "")
+        .trim();
+      const firstBrace = stripped.indexOf("{");
+      const lastBrace = stripped.lastIndexOf("}");
+      const jsonSlice = firstBrace >= 0 && lastBrace > firstBrace
+        ? stripped.slice(firstBrace, lastBrace + 1)
+        : stripped;
+      const parsed = JSON.parse(jsonSlice) as ThoughtMetadataExtracted;
       return {
         type: parsed.type ?? "observation",
         topics: parsed.topics ?? [],

@@ -25,6 +25,7 @@ We also adjusted `docker-compose.yml` for our deployment topology on `192.168.50
 | 2 | `docker-compose.yml` | Postgres internal-only, attach `api` to `litellm-langfuse_default`, switch from `env_file` to explicit `environment:` block (Portainer compatibility), replace bind-mounted `init.sql` with `build: ./db` (Portainer Git stacks stream the build context without materializing the working tree, so bind mounts pointing into the repo silently auto-create empty directories) |
 | 3 | `db/init.sql` + `db/migrations/00{1,2}*.sql` | Change `VECTOR(768)` → `VECTOR(1024)` to match bge-m3 embedding dimensions |
 | 4 | `db/Dockerfile` | Tiny image that bakes `init.sql` into `/docker-entrypoint-initdb.d/` so postgres initializes the schema without needing a host-path bind mount |
+| 5 | `src/embedder/openrouter.ts` (`extractMetadata`) | Strip markdown code fences before `JSON.parse`. Claude (via openai-compatible proxies like our Anthropic-Max one) wraps JSON in ```json fences even when `response_format: json_object` is requested, causing metadata extraction to fall back to empty defaults |
 
 A captured diff lives under `patches/0001-add-openrouter-base-url.patch` for
 durability — regenerate after any rebase with `git format-patch -1 <patch-commit> -o patches/`.
