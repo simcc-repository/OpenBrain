@@ -29,8 +29,8 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      DB_HOST: postgres
-      DB_PORT: 5432
+      DB_HOST: ${DB_HOST:-openbrain-postgres}
+      DB_PORT: ${DB_PORT:-5432}
       DB_NAME: ${DB_NAME:-openbrain}
       DB_USER: ${DB_USER:-openbrain}
       DB_PASSWORD: ${DB_PASSWORD:-changeme}
