@@ -22,7 +22,8 @@ We also adjusted `docker-compose.yml` for our deployment topology on `192.168.50
 | # | File | Purpose |
 |---|---|---|
 | 1 | `src/embedder/openrouter.ts` | Add `OPENROUTER_BASE_URL` env override (default unchanged) |
-| 2 | `docker-compose.yml` | Postgres internal-only + attach `api` to `litellm-langfuse_default` |
+| 2 | `docker-compose.yml` | Postgres internal-only, attach `api` to `litellm-langfuse_default`, switch from `env_file` to explicit `environment:` block (Portainer compatibility) |
+| 3 | `db/init.sql` + `db/migrations/00{1,2}*.sql` | Change `VECTOR(768)` → `VECTOR(1024)` to match bge-m3 embedding dimensions |
 
 A captured diff lives under `patches/0001-add-openrouter-base-url.patch` for
 durability — regenerate after any rebase with `git format-patch -1 <patch-commit> -o patches/`.

@@ -18,7 +18,7 @@ CREATE INDEX IF NOT EXISTS idx_thoughts_supersedes ON thoughts(supersedes);
 
 -- Updated semantic search function with project + archive filtering
 CREATE OR REPLACE FUNCTION match_thoughts(
-    query_embedding VECTOR(768),
+    query_embedding VECTOR(1024),
     match_threshold FLOAT DEFAULT 0.5,
     match_count     INT   DEFAULT 10,
     filter          JSONB DEFAULT '{}'::jsonb,
