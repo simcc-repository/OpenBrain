@@ -14,23 +14,25 @@ export class OpenRouterEmbedder implements Embedder {
   private readonly apiKey: string;
   private readonly embedModel: string;
   private readonly llmModel: string;
+  private readonly baseUrl: string;
 
   constructor() {
     this.apiKey = process.env.OPENROUTER_API_KEY ?? "";
     this.embedModel = process.env.OPENROUTER_EMBED_MODEL ?? "openai/text-embedding-3-small";
     this.llmModel = process.env.OPENROUTER_LLM_MODEL ?? "openai/gpt-4o-mini";
+    this.baseUrl = (process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1").replace(/\/+$/, "");
 
     if (!this.apiKey) {
       throw new Error("OPENROUTER_API_KEY is required when using openrouter provider");
     }
 
     console.log(
-      `[embedder] OpenRouter (embed: ${this.embedModel}, llm: ${this.llmModel})`
+      `[embedder] OpenRouter (base: ${this.baseUrl}, embed: ${this.embedModel}, llm: ${this.llmModel})`
     );
   }
 
   async generateEmbedding(text: string): Promise<number[]> {
-    const response = await fetch("https://openrouter.ai/api/v1/embeddings", {
+    const response = await fetch(`${this.baseUrl}/embeddings`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${this.apiKey}`,
@@ -54,7 +56,7 @@ export class OpenRouterEmbedder implements Embedder {
   }
 
   async extractMetadata(content: string): Promise<ThoughtMetadataExtracted> {
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    const response = await fetch(`${this.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${this.apiKey}`,
