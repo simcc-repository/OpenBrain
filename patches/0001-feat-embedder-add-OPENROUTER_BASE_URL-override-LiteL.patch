@@ -1,0 +1,168 @@
+From f1433965d1be3be670dc3d478544862cc9115651 Mon Sep 17 00:00:00 2001
+From: simcc-repository <adrenfu@simcc.org>
+Date: Fri, 15 May 2026 14:25:30 +0800
+Subject: [PATCH] feat(embedder): add OPENROUTER_BASE_URL override + LiteLLM
+ compose wiring
+
+Allows the openrouter embedder to be pointed at any OpenAI-compatible base URL
+(default unchanged: https://openrouter.ai/api/v1). Used to route traffic through
+our self-hosted LiteLLM gateway on 192.168.50.148:4000 for cost tracking in
+Langfuse.
+
+Also adjusts docker-compose.yml for our deployment:
+- postgres internal-only (expose, not publish)
+- api attached to external litellm-langfuse_default network
+
+See PATCH_NOTES.md for the rationale and upstream-rebase workflow.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+---
+ PATCH_NOTES.md             | 57 ++++++++++++++++++++++++++++++++++++++
+ docker-compose.yml         | 14 ++++++++--
+ src/embedder/openrouter.ts |  8 ++++--
+ 3 files changed, 73 insertions(+), 6 deletions(-)
+ create mode 100644 PATCH_NOTES.md
+
+diff --git a/PATCH_NOTES.md b/PATCH_NOTES.md
+new file mode 100644
+index 0000000..13edee8
+--- /dev/null
++++ b/PATCH_NOTES.md
+@@ -0,0 +1,57 @@
++# SIMCC fork patch notes
++
++This fork (`simcc-repository/OpenBrain`, branch `simcc-main`) carries local modifications
++on top of upstream `srnichols/OpenBrain` (default branch `master`).
++
++## Why this fork exists
++
++The upstream `openrouter` embedder provider in `src/embedder/openrouter.ts` hardcodes
++`https://openrouter.ai/api/v1` as the API base URL. We route embedding and metadata-
++extraction traffic through our self-hosted **LiteLLM gateway** (on `192.168.50.148:4000`)
++so calls are cost-tracked in Langfuse and use our existing virtual-key management. This
++fork adds an `OPENROUTER_BASE_URL` env var so the provider can be pointed at LiteLLM
++(or any OpenAI-compatible endpoint).
++
++We also adjusted `docker-compose.yml` for our deployment topology on `192.168.50.148`:
++- Postgres is internal-only (`expose:` not `ports:`) — host port 5432 is shared.
++- The `api` service is attached to the external Docker network `litellm-langfuse_default`
++  so `litellm:4000` resolves from inside the container.
++
++## Patches in this branch
++
++| # | File | Purpose |
++|---|---|---|
++| 1 | `src/embedder/openrouter.ts` | Add `OPENROUTER_BASE_URL` env override (default unchanged) |
++| 2 | `docker-compose.yml` | Postgres internal-only + attach `api` to `litellm-langfuse_default` |
++
++A captured diff lives under `patches/0001-add-openrouter-base-url.patch` for
++durability — regenerate after any rebase with `git format-patch -1 <patch-commit> -o patches/`.
++
++## Applying upstream updates
++
++```bash
++cd OpenBrain
++git fetch upstream
++git checkout simcc-main
++git rebase upstream/master      # NOTE: upstream default branch is "master", not "main"
++# Resolve any conflicts in src/embedder/openrouter.ts or docker-compose.yml.
++# Verify the OPENROUTER_BASE_URL override is still in place.
++git push --force-with-lease origin simcc-main
++```
++
++Then in Portainer → openbrain stack → **Pull and redeploy**.
++
++## Drift checks after each rebase
++
++1. `git log simcc-main ^upstream/master` should show **only** our patch commits — nothing else.
++2. `grep -rn 'openrouter\.ai' src/` should return **zero** hits inside `src/embedder/openrouter.ts`
++   (matches in `docs/` or `setup.{sh,ps1}` are fine — they're documentation).
++3. `grep -n 'OPENROUTER_BASE_URL' src/embedder/openrouter.ts` should match.
++4. `docker-compose.yml` should NOT publish postgres on host port 5432 and SHOULD attach `api`
++   to `litellm-langfuse_default`.
++
++## Retire the fork when upstream adds OPENROUTER_BASE_URL natively
++
++If upstream ever adds the same env var (consider opening a PR to make this happen),
++delete `simcc-main` and track `upstream/master` directly. The compose-file overrides
++can move into a small `docker-compose.override.yml` instead of being committed to the fork.
+diff --git a/docker-compose.yml b/docker-compose.yml
+index c401277..ce6a8c3 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -10,8 +10,8 @@ services:
+       POSTGRES_DB: openbrain
+       POSTGRES_USER: openbrain
+       POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+-    ports:
+-      - "5432:5432"
++    expose:
++      - "5432"
+     volumes:
+       - postgres_data:/var/lib/postgresql/data
+       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+@@ -35,11 +35,19 @@ services:
+     ports:
+       - "${API_PORT:-8000}:${API_PORT:-8000}"   # REST API
+       - "${MCP_PORT:-8080}:${MCP_PORT:-8080}"   # MCP Server
++    networks:
++      - default
++      - litellm
+     healthcheck:
+-      test: ["CMD", "wget", "-qO-", "http://localhost:8000/health"]
++      test: ["CMD", "wget", "-qO-", "http://localhost:${API_PORT:-8000}/health"]
+       interval: 30s
+       timeout: 5s
+       retries: 3
+ 
+ volumes:
+   postgres_data:
++
++networks:
++  litellm:
++    name: litellm-langfuse_default
++    external: true
+diff --git a/src/embedder/openrouter.ts b/src/embedder/openrouter.ts
+index 10d7f92..216ccc1 100644
+--- a/src/embedder/openrouter.ts
++++ b/src/embedder/openrouter.ts
+@@ -14,23 +14,25 @@ export class OpenRouterEmbedder implements Embedder {
+   private readonly apiKey: string;
+   private readonly embedModel: string;
+   private readonly llmModel: string;
++  private readonly baseUrl: string;
+ 
+   constructor() {
+     this.apiKey = process.env.OPENROUTER_API_KEY ?? "";
+     this.embedModel = process.env.OPENROUTER_EMBED_MODEL ?? "openai/text-embedding-3-small";
+     this.llmModel = process.env.OPENROUTER_LLM_MODEL ?? "openai/gpt-4o-mini";
++    this.baseUrl = (process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1").replace(/\/+$/, "");
+ 
+     if (!this.apiKey) {
+       throw new Error("OPENROUTER_API_KEY is required when using openrouter provider");
+     }
+ 
+     console.log(
+-      `[embedder] OpenRouter (embed: ${this.embedModel}, llm: ${this.llmModel})`
++      `[embedder] OpenRouter (base: ${this.baseUrl}, embed: ${this.embedModel}, llm: ${this.llmModel})`
+     );
+   }
+ 
+   async generateEmbedding(text: string): Promise<number[]> {
+-    const response = await fetch("https://openrouter.ai/api/v1/embeddings", {
++    const response = await fetch(`${this.baseUrl}/embeddings`, {
+       method: "POST",
+       headers: {
+         Authorization: `Bearer ${this.apiKey}`,
+@@ -54,7 +56,7 @@ export class OpenRouterEmbedder implements Embedder {
+   }
+ 
+   async extractMetadata(content: string): Promise<ThoughtMetadataExtracted> {
+-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
++    const response = await fetch(`${this.baseUrl}/chat/completions`, {
+       method: "POST",
+       headers: {
+         Authorization: `Bearer ${this.apiKey}`,
+-- 
+2.43.0
+
